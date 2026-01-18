@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="popup.css">
+  <title>GPTCast</title>
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo">
+        <img src="../../assets/icons/icon-32.png" alt="" class="logo-icon">
+        <h1>GPTCast</h1>
+      </div>
+      <button id="settings-btn" class="icon-btn" title="Settings" aria-label="Settings">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+      </button>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="main">
+      <!-- Initial State -->
+      <section id="view-initial" class="view active">
+        <p class="subtitle">Transform ChatGPT conversations into podcast audio</p>
+        <button id="extract-btn" class="btn btn-primary">
+          Extract Conversation
+        </button>
+        <p class="hint" id="hint-text">Open a ChatGPT conversation first</p>
+      </section>
+
+      <!-- Preview State -->
+      <section id="view-preview" class="view">
+        <div class="preview-card">
+          <h2 id="preview-title" class="preview-title">Conversation Title</h2>
+          <p id="preview-count" class="preview-meta">0 messages</p>
+        </div>
+
+        <div class="form-group">
+          <label for="voice-select">Voice</label>
+          <select id="voice-select" class="select">
+            <option value="Puck">Puck (Upbeat)</option>
+            <option value="Kore">Kore (Firm)</option>
+            <option value="Charon">Charon (Warm)</option>
+            <option value="Fenrir">Fenrir (Deep)</option>
+            <option value="Aoede">Aoede (Bright)</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="music-select">Background Music</label>
+          <select id="music-select" class="select">
+            <option value="calm">Calm</option>
+            <option value="upbeat">Upbeat</option>
+            <option value="ambient">Ambient</option>
+            <option value="none">No Music</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input type="checkbox" id="condensed-check">
+            <span>Condensed mode (shorter output)</span>
+          </label>
+        </div>
+
+        <button id="generate-btn" class="btn btn-primary">
+          Generate Podcast
+        </button>
+        <button id="cancel-preview-btn" class="btn btn-text">Cancel</button>
+      </section>
+
+      <!-- Processing State -->
+      <section id="view-processing" class="view">
+        <div class="progress-container">
+          <div class="progress-bar">
+            <div id="progress-fill" class="progress-fill" style="width: 0%"></div>
+          </div>
+          <p id="progress-stage" class="progress-stage">Preparing...</p>
+          <p id="progress-detail" class="progress-detail"></p>
+        </div>
+        <div class="spinner"></div>
+        <button id="cancel-processing-btn" class="btn btn-text">Cancel</button>
+      </section>
+
+      <!-- Complete State -->
+      <section id="view-complete" class="view">
+        <div class="success-icon">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M9 12l2 2 4-4"/>
+          </svg>
+        </div>
+        <h2>Podcast Ready!</h2>
+        <p class="success-meta" id="success-meta">Download should start automatically</p>
+        <button id="download-again-btn" class="btn btn-secondary">Download Again</button>
+        <button id="start-over-btn" class="btn btn-text">Create Another</button>
+      </section>
+
+      <!-- Error State -->
+      <section id="view-error" class="view">
+        <div class="error-icon">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="12"/>
+            <line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+        </div>
+        <h2>Something went wrong</h2>
+        <p class="error-message" id="error-message">Unknown error occurred</p>
+        <button id="retry-btn" class="btn btn-secondary">Try Again</button>
+        <button id="error-start-over-btn" class="btn btn-text">Start Over</button>
+      </section>
+
+      <!-- Settings State -->
+      <section id="view-settings" class="view">
+        <h2>Settings</h2>
+
+        <div class="form-group">
+          <label for="api-key-input">Gemini API Key</label>
+          <div class="input-group">
+            <input type="password" id="api-key-input" class="input" placeholder="Enter your API key">
+            <button id="toggle-key-btn" class="icon-btn" title="Show/Hide" aria-label="Toggle visibility">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+            </button>
+          </div>
+          <p class="hint">Get your key from <a href="https://aistudio.google.com/apikey" target="_blank">AI Studio</a></p>
+        </div>
+
+        <div class="btn-group">
+          <button id="save-key-btn" class="btn btn-primary">Save Key</button>
+          <button id="test-key-btn" class="btn btn-secondary">Test API</button>
+        </div>
+
+        <p id="settings-status" class="status-text"></p>
+
+        <button id="back-btn" class="btn btn-text">Back</button>
+      </section>
+    </main>
+  </div>
+
+  <script src="popup.js" type="module"></script>
+</body>
+</html>
