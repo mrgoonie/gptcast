@@ -33,45 +33,16 @@ function getDB() {
 }
 
 /**
- * Store audio segments in IndexedDB
+ * Store work data (segments + musicUrl) in IndexedDB
+ * This is read by offscreen document immediately on load
  */
-export async function storeAudioSegments(segments) {
+export async function storeWorkData(segments, musicUrl) {
   const db = await getDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readwrite');
     const store = tx.objectStore(STORE_NAME);
 
-    store.put(segments, 'current');
-
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
-}
-
-/**
- * Retrieve audio segments from IndexedDB
- */
-export async function getAudioSegments() {
-  const db = await getDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readonly');
-    const store = tx.objectStore(STORE_NAME);
-    const request = store.get('current');
-
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-/**
- * Clear stored audio segments
- */
-export async function clearAudioSegments() {
-  const db = await getDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readwrite');
-    const store = tx.objectStore(STORE_NAME);
-    store.delete('current');
+    store.put({ segments, musicUrl }, 'work');
 
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);

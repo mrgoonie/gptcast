@@ -55,23 +55,23 @@ function getDB() {
   return dbPromise;
 }
 
-async function getAudioSegments() {
+async function getWorkData() {
   const db = await getDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readonly');
     const store = tx.objectStore(STORE_NAME);
-    const request = store.get('current');
+    const request = store.get('work');
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
 }
 
-async function clearAudioSegments() {
+async function clearWorkData() {
   const db = await getDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readwrite');
     const store = tx.objectStore(STORE_NAME);
-    store.delete('current');
+    store.delete('work');
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
@@ -80,58 +80,64 @@ async function clearAudioSegments() {
 let mixer = null;
 
 /**
- * Message handler
+ * Auto-start processing immediately on load
+ * Service worker stores data to IndexedDB BEFORE creating offscreen,
+ * so we can read and process immediately without waiting for a message.
  */
-console.log('[GPTCast Offscreen] Setting up message listener...');
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  console.log('[GPTCast Offscreen] Message received:', message.type);
+console.log('[GPTCast Offscreen] Starting auto-processing...');
 
-  // Only handle messages meant for offscreen document
-  if (message.type === MSG.MIX_AUDIO_OFFSCREEN) {
-    console.log('[GPTCast Offscreen] Received mix request');
+async function autoProcess() {
+  console.log('[GPTCast Offscreen] Auto-process started');
 
-    // Check if AudioMixer was loaded
-    if (!AudioMixer) {
-      console.error('[GPTCast Offscreen] AudioMixer not loaded!');
-      sendResponse({ success: false, error: 'AudioMixer module failed to load' });
-      return true;
+  if (!AudioMixer) {
+    console.error('[GPTCast Offscreen] AudioMixer not loaded!');
+    chrome.runtime.sendMessage({
+      type: 'mix_audio_result',
+      success: false,
+      error: 'AudioMixer module failed to load'
+    }).catch(() => {});
+    return;
+  }
+
+  try {
+    // Read work parameters from IndexedDB
+    const workData = await getWorkData();
+    console.log('[GPTCast Offscreen] Work data:', workData ? 'found' : 'not found');
+
+    if (!workData) {
+      chrome.runtime.sendMessage({
+        type: 'mix_audio_result',
+        success: false,
+        error: 'No work data found in storage'
+      }).catch(() => {});
+      return;
     }
 
-    handleMixAudio(message, sendResponse);
-    return true; // Will respond asynchronously
-  }
-  // Return false for all other messages - we won't respond
-  return false;
-});
-console.log('[GPTCast Offscreen] Message listener registered');
-
-async function handleMixAudio(message, sendResponse) {
-  console.log('[GPTCast Offscreen] Starting mix...');
-  try {
-    // Read segments from IndexedDB (service worker stored them there)
-    const segments = await getAudioSegments();
-    console.log('[GPTCast Offscreen] Retrieved segments from IndexedDB:', segments?.length);
+    const { segments, musicUrl } = workData;
+    console.log('[GPTCast Offscreen] Segments:', segments?.length, 'Music:', musicUrl);
 
     if (!segments?.length) {
-      sendResponse({ success: false, error: 'No audio segments found in storage' });
+      chrome.runtime.sendMessage({
+        type: 'mix_audio_result',
+        success: false,
+        error: 'No audio segments found'
+      }).catch(() => {});
       return;
     }
 
     mixer = new AudioMixer();
 
-    console.log('[GPTCast Offscreen] Calling mixer.mixAudio...');
+    console.log('[GPTCast Offscreen] Calling mixer.mixAudio with', segments.length, 'segments...');
+    console.log('[GPTCast Offscreen] NOTE: Real-time recording - this takes the actual duration of the audio!');
+
     const blob = await mixer.mixAudio(
       segments,
-      message.musicUrl,
+      musicUrl,
       (progress) => {
-        try {
-          chrome.runtime.sendMessage({
-            type: MSG.PROGRESS_UPDATE,
-            ...progress
-          }).catch(() => {});
-        } catch {
-          // Popup may be closed
-        }
+        chrome.runtime.sendMessage({
+          type: MSG.PROGRESS_UPDATE,
+          ...progress
+        }).catch(() => {});
       }
     );
 
@@ -141,23 +147,31 @@ async function handleMixAudio(message, sendResponse) {
     const base64 = await blobToBase64(blob);
     console.log('[GPTCast Offscreen] Converted to base64, length:', base64.length);
 
-    sendResponse({
+    // Send result back to service worker
+    chrome.runtime.sendMessage({
+      type: 'mix_audio_result',
       success: true,
       data: {
         audio: base64,
         mimeType: blob.type,
         size: blob.size
       }
-    });
-    console.log('[GPTCast Offscreen] Response sent');
+    }).catch(() => {});
+
+    console.log('[GPTCast Offscreen] Result sent to service worker');
 
     // Cleanup
     mixer.cleanup();
     mixer = null;
-    await clearAudioSegments();
+    await clearWorkData();
+
   } catch (error) {
     console.error('[GPTCast Offscreen] Mix error:', error);
-    sendResponse({ success: false, error: error.message });
+    chrome.runtime.sendMessage({
+      type: 'mix_audio_result',
+      success: false,
+      error: error.message
+    }).catch(() => {});
 
     if (mixer) {
       mixer.cleanup();
@@ -165,6 +179,9 @@ async function handleMixAudio(message, sendResponse) {
     }
   }
 }
+
+// Start processing immediately
+autoProcess();
 
 async function blobToBase64(blob) {
   return new Promise((resolve, reject) => {
@@ -179,12 +196,4 @@ async function blobToBase64(blob) {
   });
 }
 
-// Signal to service worker that offscreen is ready with diagnostic info
-chrome.runtime.sendMessage({
-  type: MSG.OFFSCREEN_READY,
-  diagnostics: {
-    audioMixerLoaded: !!AudioMixer,
-    timestamp: Date.now()
-  }
-}).catch(() => {});
-console.log('[GPTCast] Offscreen document ready, AudioMixer loaded:', !!AudioMixer);
+// Note: No ready signal needed - we auto-process immediately on load

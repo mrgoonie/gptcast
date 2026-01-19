@@ -7,70 +7,69 @@ import { STORAGE_KEYS } from '../shared/constants.js';
 import { ScriptGenerator } from './script-generator.js';
 import { TTSGenerator } from './tts-generator.js';
 import { GeminiClient } from './gemini-client.js';
-import { storeAudioSegments } from '../shared/audio-storage.js';
-
-let offscreenDocumentCreated = false;
-let offscreenCreationInProgress = false;
-let offscreenReadyPromise = null;
-let offscreenReadyResolve = null;
+import { storeWorkData } from '../shared/audio-storage.js';
 
 // In-memory cache for audio (too large for chrome.storage.local quota)
 let currentAudioResult = null;
 
+// Promise resolver for mix result (set when waiting for offscreen result)
+let mixResultResolve = null;
+
 /**
- * Ensure offscreen document exists for audio operations
- * Uses locking to prevent race conditions during creation
+ * Close any existing offscreen document
  */
-async function ensureOffscreenDocument() {
-  if (offscreenDocumentCreated) return;
-
-  if (offscreenCreationInProgress) {
-    while (offscreenCreationInProgress) {
-      await new Promise(r => setTimeout(r, 50));
-    }
-    return;
-  }
-
-  offscreenCreationInProgress = true;
-
+async function closeOffscreenDocument() {
   try {
     const existingContexts = await chrome.runtime.getContexts({
       contextTypes: ['OFFSCREEN_DOCUMENT']
     });
-
     if (existingContexts.length > 0) {
-      offscreenDocumentCreated = true;
-      return;
+      await chrome.offscreen.closeDocument();
     }
-
-    // Create promise to wait for ready signal
-    offscreenReadyPromise = new Promise(resolve => {
-      offscreenReadyResolve = resolve;
-    });
-
-    await chrome.offscreen.createDocument({
-      url: 'src/offscreen/offscreen.html',
-      reasons: ['AUDIO_PLAYBACK'],
-      justification: 'Audio mixing and export for podcast generation'
-    });
-
-    // Wait for offscreen document to signal ready (with 5s timeout)
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Offscreen document init timeout')), 5000)
-    );
-
-    try {
-      await Promise.race([offscreenReadyPromise, timeoutPromise]);
-      console.log('[GPTCast SW] Offscreen document ready signal received');
-    } catch (e) {
-      console.warn('[GPTCast SW] Offscreen ready timeout, proceeding anyway');
-    }
-
-    offscreenDocumentCreated = true;
-    console.log('[GPTCast SW] Offscreen document created');
-  } finally {
-    offscreenCreationInProgress = false;
+  } catch (e) {
+    // Ignore errors
   }
+}
+
+/**
+ * Run audio mixing in offscreen document
+ * New flow: Store data FIRST, then create offscreen which auto-processes
+ */
+async function runOffscreenMixing(segments, musicUrl) {
+  // Close any existing offscreen document first
+  await closeOffscreenDocument();
+
+  // Store work data BEFORE creating offscreen
+  console.log('[GPTCast SW] Storing work data in IndexedDB:', segments.length, 'segments');
+  await storeWorkData(segments, musicUrl);
+
+  // Create promise to wait for result
+  const resultPromise = new Promise((resolve, reject) => {
+    mixResultResolve = resolve;
+    // Timeout after 5 minutes (audio mixing can take a while)
+    setTimeout(() => {
+      mixResultResolve = null;
+      reject(new Error('Audio mixing timeout'));
+    }, 300000);
+  });
+
+  // Create offscreen document - it will auto-process immediately
+  console.log('[GPTCast SW] Creating offscreen document...');
+  await chrome.offscreen.createDocument({
+    url: 'src/offscreen/offscreen.html',
+    reasons: ['AUDIO_PLAYBACK'],
+    justification: 'Audio mixing and export for podcast generation'
+  });
+  console.log('[GPTCast SW] Offscreen document created, waiting for result...');
+
+  // Wait for result from offscreen
+  const result = await resultPromise;
+  console.log('[GPTCast SW] Mix result received:', result?.success);
+
+  // Close offscreen document after processing
+  await closeOffscreenDocument();
+
+  return result;
 }
 
 /**
@@ -121,12 +120,15 @@ function sendProgress(progress) {
  * Returns true only for messages we handle asynchronously
  */
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  // Handle offscreen ready signal
-  if (message.type === MSG.OFFSCREEN_READY) {
-    console.log('[GPTCast SW] Received offscreen ready signal, diagnostics:', message.diagnostics);
-    if (offscreenReadyResolve) {
-      offscreenReadyResolve();
-      offscreenReadyResolve = null;
+  // Handle mix result from offscreen document
+  if (message.type === 'mix_audio_result') {
+    console.log('[GPTCast SW] Received mix result from offscreen:', message.success);
+    if (!message.success) {
+      console.error('[GPTCast SW] Mix error from offscreen:', message.error);
+    }
+    if (mixResultResolve) {
+      mixResultResolve(message);
+      mixResultResolve = null;
     }
     return false;
   }
@@ -291,11 +293,9 @@ async function handleGenerateTTS(message, sendResponse) {
 }
 
 /**
- * Handle audio mixing request - forwards to offscreen document
+ * Handle audio mixing request - uses new auto-processing offscreen flow
  */
 async function handleMixAudio(message, sendResponse) {
-  await ensureOffscreenDocument();
-
   if (!currentAudioResult?.segments?.length) {
     sendResponse({ success: false, error: 'No audio segments. Please generate TTS audio first.' });
     return;
@@ -303,16 +303,7 @@ async function handleMixAudio(message, sendResponse) {
 
   try {
     const musicUrl = getMusicUrl(message.musicMood || 'calm');
-
-    // Store segments in IndexedDB (avoids Chrome messaging size limits)
-    await storeAudioSegments(currentAudioResult.segments);
-
-    // Forward to offscreen document for mixing
-    const response = await chrome.runtime.sendMessage({
-      type: MSG.MIX_AUDIO_OFFSCREEN,
-      musicUrl
-    });
-
+    const response = await runOffscreenMixing(currentAudioResult.segments, musicUrl);
     sendResponse(response);
   } catch (error) {
     console.error('[GPTCast SW] Mix audio error:', error);
@@ -324,8 +315,6 @@ async function handleMixAudio(message, sendResponse) {
  * Handle full podcast generation pipeline
  */
 async function handleGeneratePodcast(message, sendResponse) {
-  await ensureOffscreenDocument();
-
   if (!currentAudioResult?.segments?.length) {
     sendResponse({ success: false, error: 'No audio segments. Please generate TTS audio first.' });
     return;
@@ -336,29 +325,8 @@ async function handleGeneratePodcast(message, sendResponse) {
 
     sendProgress({ stage: 'mixing', progress: 0, detail: 'Starting audio mix...' });
 
-    // Store segments in IndexedDB (avoids Chrome messaging size limits)
-    console.log('[GPTCast SW] Storing segments in IndexedDB:', currentAudioResult.segments.length);
-    await storeAudioSegments(currentAudioResult.segments);
-
-    // Send small message to trigger offscreen processing
-    let mixResponse;
-    try {
-      mixResponse = await chrome.runtime.sendMessage({
-        type: MSG.MIX_AUDIO_OFFSCREEN,
-        musicUrl
-        // segments are read from IndexedDB by offscreen
-      });
-      console.log('[GPTCast SW] Offscreen response received:', mixResponse?.success);
-    } catch (msgError) {
-      console.error('[GPTCast SW] Message to offscreen failed:', msgError.message);
-      // Try recreating offscreen document and retry
-      offscreenDocumentCreated = false;
-      await ensureOffscreenDocument();
-      mixResponse = await chrome.runtime.sendMessage({
-        type: MSG.MIX_AUDIO_OFFSCREEN,
-        musicUrl
-      });
-    }
+    // Run mixing in offscreen document (auto-processing flow)
+    const mixResponse = await runOffscreenMixing(currentAudioResult.segments, musicUrl);
 
     if (!mixResponse?.success) {
       sendResponse(mixResponse || { success: false, error: 'No response from audio mixer' });
@@ -408,7 +376,8 @@ async function triggerDownload(audioData) {
   const conversation = stored[STORAGE_KEYS.CURRENT_CONVERSATION];
   const title = sanitizeFilename(conversation?.title || 'podcast');
   const timestamp = new Date().toISOString().slice(0, 10);
-  const extension = audioData.mimeType.includes('webm') ? 'webm' : 'mp3';
+  const extension = audioData.mimeType.includes('wav') ? 'wav' :
+                    audioData.mimeType.includes('webm') ? 'webm' : 'mp3';
 
   await chrome.downloads.download({
     url: dataUrl,
