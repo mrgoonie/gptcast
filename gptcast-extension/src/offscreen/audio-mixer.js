@@ -34,7 +34,11 @@ export class AudioMixer {
         throw new Error('No audio content to mix');
       }
 
+      // Log buffer details for debugging
+      const speechCount = speechBuffers.filter(b => b.type === 'speech').length;
+      const silenceCount = speechBuffers.filter(b => b.type === 'silence').length;
       console.log('[AudioMixer] Total duration:', totalDuration.toFixed(2), 'seconds');
+      console.log('[AudioMixer] Speech segments:', speechCount, 'Silence segments:', silenceCount);
       console.log('[AudioMixer] Using OFFLINE rendering (fast, not real-time)');
 
       this.safeProgress(onProgress, { stage: 'mixing', progress: 50, detail: 'Rendering audio...' });
@@ -64,7 +68,8 @@ export class AudioMixer {
 
       // Render offline (FAST - CPU speed, not real-time!)
       const renderedBuffer = await offlineContext.startRendering();
-      console.log('[AudioMixer] Offline rendering complete');
+      const hasRenderedContent = this.hasAudioContent(renderedBuffer);
+      console.log('[AudioMixer] Offline rendering complete, hasAudio:', hasRenderedContent, 'samples:', renderedBuffer.length);
 
       this.safeProgress(onProgress, { stage: 'mixing', progress: 90, detail: 'Encoding...' });
 
@@ -113,10 +118,16 @@ export class AudioMixer {
       });
 
       if (segment.type === 'audio') {
-        const buffer = await this.decodeSegment(context, segment.data);
+        // TTS stores as 'audioData', not 'data'
+        const buffer = await this.decodeSegment(context, segment.audioData);
+        const hasContent = this.hasAudioContent(buffer);
+        console.log(`[AudioMixer] Segment ${i}: audio, duration=${buffer.duration.toFixed(2)}s, samples=${buffer.length}, hasAudio=${hasContent}`);
         buffers.push({ type: 'speech', buffer, duration: buffer.duration });
       } else if (segment.type === 'audio_chunked') {
-        const buffer = await this.decodeChunkedSegment(context, segment.chunks);
+        // TTS stores as 'audioChunks', not 'chunks'
+        const buffer = await this.decodeChunkedSegment(context, segment.audioChunks);
+        const hasContent = this.hasAudioContent(buffer);
+        console.log(`[AudioMixer] Segment ${i}: chunked, duration=${buffer.duration.toFixed(2)}s, samples=${buffer.length}, chunks=${segment.audioChunks.length}, hasAudio=${hasContent}`);
         buffers.push({ type: 'speech', buffer, duration: buffer.duration });
       } else if (segment.type === 'silence') {
         buffers.push({ type: 'silence', silenceDuration: segment.duration || 0.5 });
@@ -223,12 +234,45 @@ export class AudioMixer {
   }
 
   scheduleMusic(context, musicGain, musicBuffer, totalDuration) {
+    // Copy buffer to this context (buffers are context-specific)
+    const contextBuffer = this.copyBufferToContext(context, musicBuffer);
+
     const source = context.createBufferSource();
-    source.buffer = musicBuffer;
+    source.buffer = contextBuffer;
     source.loop = true;
     source.connect(musicGain);
     source.start(0);
     source.stop(totalDuration);
+  }
+
+  /**
+   * Copy AudioBuffer to a new context (required because buffers are context-specific)
+   */
+  copyBufferToContext(context, sourceBuffer) {
+    const newBuffer = context.createBuffer(
+      sourceBuffer.numberOfChannels,
+      sourceBuffer.length,
+      sourceBuffer.sampleRate
+    );
+    for (let channel = 0; channel < sourceBuffer.numberOfChannels; channel++) {
+      const sourceData = sourceBuffer.getChannelData(channel);
+      const destData = newBuffer.getChannelData(channel);
+      destData.set(sourceData);
+    }
+    return newBuffer;
+  }
+
+  /**
+   * Check if buffer has actual audio (not all zeros/silence)
+   */
+  hasAudioContent(buffer) {
+    const data = buffer.getChannelData(0);
+    let maxAbs = 0;
+    // Sample every 1000th value for performance
+    for (let i = 0; i < data.length; i += 1000) {
+      maxAbs = Math.max(maxAbs, Math.abs(data[i]));
+    }
+    return maxAbs > 0.001; // threshold for "has audio"
   }
 
   scheduleSpeech(context, speechGain, musicGain, speechBuffers, hasMusic) {
@@ -242,8 +286,11 @@ export class AudioMixer {
           musicGain.gain.linearRampToValueAtTime(this.musicDuckVolume, currentTime);
         }
 
+        // Copy buffer to this context (buffers are context-specific)
+        const contextBuffer = this.copyBufferToContext(context, buffer.buffer);
+
         const source = context.createBufferSource();
-        source.buffer = buffer.buffer;
+        source.buffer = contextBuffer;
         source.connect(speechGain);
         source.start(currentTime);
 
