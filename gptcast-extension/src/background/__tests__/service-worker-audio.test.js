@@ -501,7 +501,7 @@ describe('Service Worker - Audio Operations', () => {
       );
     });
 
-    it('should create blob from base64 audio', async () => {
+    it('should create data URL from base64 audio', async () => {
       chrome.storage.local.get.mockResolvedValue({
         [STORAGE_KEYS.CURRENT_CONVERSATION]: { title: 'Test' }
       });
@@ -519,7 +519,7 @@ describe('Service Worker - Audio Operations', () => {
 
       expect(chrome.downloads.download).toHaveBeenCalledWith(
         expect.objectContaining({
-          url: expect.stringContaining('blob:')
+          url: expect.stringMatching(/^data:audio\/webm;base64,/)
         })
       );
     });
@@ -551,7 +551,7 @@ describe('Service Worker - Audio Operations', () => {
   });
 
   describe('triggerDownload', () => {
-    it('should create object URL from blob', async () => {
+    it('should create data URL from base64', async () => {
       chrome.storage.local.get.mockResolvedValue({
         [STORAGE_KEYS.CURRENT_CONVERSATION]: { title: 'Podcast' }
       });
@@ -569,7 +569,7 @@ describe('Service Worker - Audio Operations', () => {
 
       expect(chrome.downloads.download).toHaveBeenCalledWith(
         expect.objectContaining({
-          url: expect.stringMatching(/^blob:/)
+          url: expect.stringMatching(/^data:audio\/webm;base64,/)
         })
       );
     });

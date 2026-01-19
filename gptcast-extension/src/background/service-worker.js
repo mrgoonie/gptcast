@@ -311,15 +311,10 @@ async function handleDownloadAudio(message, sendResponse) {
 
 /**
  * Trigger browser download for audio
+ * Uses data URL since Service Workers don't have URL.createObjectURL
  */
 async function triggerDownload(audioData) {
-  const byteChars = atob(audioData.audio);
-  const byteArray = new Uint8Array(byteChars.length);
-  for (let i = 0; i < byteChars.length; i++) {
-    byteArray[i] = byteChars.charCodeAt(i);
-  }
-  const blob = new Blob([byteArray], { type: audioData.mimeType });
-  const url = URL.createObjectURL(blob);
+  const dataUrl = `data:${audioData.mimeType};base64,${audioData.audio}`;
 
   const stored = await chrome.storage.local.get(STORAGE_KEYS.CURRENT_CONVERSATION);
   const conversation = stored[STORAGE_KEYS.CURRENT_CONVERSATION];
@@ -328,12 +323,10 @@ async function triggerDownload(audioData) {
   const extension = audioData.mimeType.includes('webm') ? 'webm' : 'mp3';
 
   await chrome.downloads.download({
-    url,
+    url: dataUrl,
     filename: `gptcast-${title}-${timestamp}.${extension}`,
     saveAs: true
   });
-
-  setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
 /**
