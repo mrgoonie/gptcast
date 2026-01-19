@@ -25,6 +25,7 @@ bin/
 # misc
 .DS_Store
 *.pem
+*.wav
 
 # debug
 npm-debug.log*
