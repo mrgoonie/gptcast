@@ -88,8 +88,7 @@ We keep all important docs in `./docs` folder and keep updating them, structure 
 ## API Docs
 Gemini TTS:
 - https://docs.cloud.google.com/text-to-speech/docs/gemini-tts
-- https://github.com/GoogleCloudPlatform/generative-ai/blob/main/audio/speech/getting-starte
-d/get_started_with_gemini_tts_voices.ipynb
+- https://github.com/GoogleCloudPlatform/generative-ai/blob/main/audio/speech/getting-started/get_started_with_gemini_tts_voices.ipynb
 - https://docs.cloud.google.com/text-to-speech/docs/chirp3-hd
 - https://docs.cloud.google.com/text-to-speech/docs/chirp3-instant-custom-voice
 - https://docs.cloud.google.com/text-to-speech/docs/create-audio-text-client-libraries
