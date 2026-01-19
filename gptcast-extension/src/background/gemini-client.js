@@ -71,8 +71,9 @@ export class GeminiClient {
     const { voice = 'Puck', emotion = 'neutral' } = options;
     const prompt = this.buildTTSPrompt(text, emotion);
 
-    const ttsModel = API.GEMINI_TTS_MODEL || 'gemini-2.5-flash-tts';
+    const ttsModel = API.GEMINI_TTS_MODEL;
     const endpoint = `${API.GEMINI_BASE}/${ttsModel}:generateContent?key=${this.apiKey}`;
+    console.log('[GPTCast] TTS request:', { model: ttsModel, textLength: text.length });
 
     const body = {
       contents: [{
@@ -109,6 +110,7 @@ export class GeminiClient {
         }
 
         const data = await response.json();
+        console.log('[GPTCast] TTS response:', JSON.stringify(data).slice(0, 500));
         return this.parseTTSResponse(data);
       } catch (error) {
         lastError = error;

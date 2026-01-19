@@ -7,9 +7,15 @@ import { STORAGE_KEYS } from '../shared/constants.js';
 import { ScriptGenerator } from './script-generator.js';
 import { TTSGenerator } from './tts-generator.js';
 import { GeminiClient } from './gemini-client.js';
+import { storeAudioSegments } from '../shared/audio-storage.js';
 
 let offscreenDocumentCreated = false;
 let offscreenCreationInProgress = false;
+let offscreenReadyPromise = null;
+let offscreenReadyResolve = null;
+
+// In-memory cache for audio (too large for chrome.storage.local quota)
+let currentAudioResult = null;
 
 /**
  * Ensure offscreen document exists for audio operations
@@ -37,12 +43,31 @@ async function ensureOffscreenDocument() {
       return;
     }
 
+    // Create promise to wait for ready signal
+    offscreenReadyPromise = new Promise(resolve => {
+      offscreenReadyResolve = resolve;
+    });
+
     await chrome.offscreen.createDocument({
       url: 'src/offscreen/offscreen.html',
       reasons: ['AUDIO_PLAYBACK'],
       justification: 'Audio mixing and export for podcast generation'
     });
+
+    // Wait for offscreen document to signal ready (with 5s timeout)
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Offscreen document init timeout')), 5000)
+    );
+
+    try {
+      await Promise.race([offscreenReadyPromise, timeoutPromise]);
+      console.log('[GPTCast SW] Offscreen document ready signal received');
+    } catch (e) {
+      console.warn('[GPTCast SW] Offscreen ready timeout, proceeding anyway');
+    }
+
     offscreenDocumentCreated = true;
+    console.log('[GPTCast SW] Offscreen document created');
   } finally {
     offscreenCreationInProgress = false;
   }
@@ -93,10 +118,47 @@ function sendProgress(progress) {
 
 /**
  * Main message handler
+ * Returns true only for messages we handle asynchronously
  */
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  handleMessage(message, sender, sendResponse);
-  return true;
+  // Handle offscreen ready signal
+  if (message.type === MSG.OFFSCREEN_READY) {
+    console.log('[GPTCast SW] Received offscreen ready signal, diagnostics:', message.diagnostics);
+    if (offscreenReadyResolve) {
+      offscreenReadyResolve();
+      offscreenReadyResolve = null;
+    }
+    return false;
+  }
+
+  // Ignore progress updates from offscreen - no response needed
+  if (message.type === MSG.PROGRESS_UPDATE) {
+    return false;
+  }
+
+  // Ignore other messages from offscreen document
+  if (sender.url?.includes('offscreen')) {
+    return false;
+  }
+
+  // Handle known message types asynchronously
+  const knownTypes = [
+    MSG.CONVERSATION_DATA,
+    MSG.GENERATE_SCRIPT,
+    MSG.GENERATE_TTS,
+    MSG.MIX_AUDIO,
+    MSG.GENERATE_PODCAST,
+    MSG.DOWNLOAD_AUDIO,
+    MSG.TEST_API_KEY
+  ];
+
+  if (knownTypes.includes(message.type)) {
+    handleMessage(message, sender, sendResponse);
+    return true; // Will respond asynchronously
+  }
+
+  // Unknown message type - don't handle
+  return false;
 });
 
 /**
@@ -139,7 +201,7 @@ async function handleMessage(message, sender, sendResponse) {
         break;
 
       default:
-        sendResponse({ error: 'Unknown message type: ' + message.type });
+        sendResponse({ success: false, error: 'Unknown message type: ' + message.type });
     }
   } catch (error) {
     console.error('[GPTCast SW] Error handling message:', error);
@@ -206,9 +268,22 @@ async function handleGenerateTTS(message, sendResponse) {
       onProgress: sendProgress
     });
 
-    await chrome.storage.local.set({ [STORAGE_KEYS.CURRENT_AUDIO]: result });
+    // Check for error segments
+    const errorSegments = result.segments.filter(s => s.type === 'error');
+    if (errorSegments.length > 0) {
+      console.error('[GPTCast SW] TTS errors:', errorSegments);
+      const audioSegments = result.segments.filter(s => s.type === 'audio' || s.type === 'audio_chunked');
+      if (audioSegments.length === 0) {
+        sendResponse({ success: false, error: `TTS failed: ${errorSegments[0].error}` });
+        return;
+      }
+      console.warn(`[GPTCast SW] ${errorSegments.length} segments failed, ${audioSegments.length} succeeded`);
+    }
 
-    sendResponse({ success: true, data: result });
+    // Store in memory (too large for chrome.storage.local quota)
+    currentAudioResult = result;
+
+    sendResponse({ success: true, data: { segmentCount: result.segments.length } });
   } catch (error) {
     console.error('[GPTCast SW] TTS generation error:', error);
     sendResponse({ success: false, error: error.message });
@@ -221,10 +296,7 @@ async function handleGenerateTTS(message, sendResponse) {
 async function handleMixAudio(message, sendResponse) {
   await ensureOffscreenDocument();
 
-  const stored = await chrome.storage.local.get(STORAGE_KEYS.CURRENT_AUDIO);
-  const audioResult = stored[STORAGE_KEYS.CURRENT_AUDIO];
-
-  if (!audioResult?.segments?.length) {
+  if (!currentAudioResult?.segments?.length) {
     sendResponse({ success: false, error: 'No audio segments. Please generate TTS audio first.' });
     return;
   }
@@ -232,10 +304,12 @@ async function handleMixAudio(message, sendResponse) {
   try {
     const musicUrl = getMusicUrl(message.musicMood || 'calm');
 
+    // Store segments in IndexedDB (avoids Chrome messaging size limits)
+    await storeAudioSegments(currentAudioResult.segments);
+
     // Forward to offscreen document for mixing
     const response = await chrome.runtime.sendMessage({
-      type: MSG.MIX_AUDIO,
-      segments: audioResult.segments,
+      type: MSG.MIX_AUDIO_OFFSCREEN,
       musicUrl
     });
 
@@ -252,10 +326,7 @@ async function handleMixAudio(message, sendResponse) {
 async function handleGeneratePodcast(message, sendResponse) {
   await ensureOffscreenDocument();
 
-  const stored = await chrome.storage.local.get(STORAGE_KEYS.CURRENT_AUDIO);
-  const audioResult = stored[STORAGE_KEYS.CURRENT_AUDIO];
-
-  if (!audioResult?.segments?.length) {
+  if (!currentAudioResult?.segments?.length) {
     sendResponse({ success: false, error: 'No audio segments. Please generate TTS audio first.' });
     return;
   }
@@ -265,15 +336,32 @@ async function handleGeneratePodcast(message, sendResponse) {
 
     sendProgress({ stage: 'mixing', progress: 0, detail: 'Starting audio mix...' });
 
-    // Send to offscreen for mixing
-    const mixResponse = await chrome.runtime.sendMessage({
-      type: MSG.MIX_AUDIO,
-      segments: audioResult.segments,
-      musicUrl
-    });
+    // Store segments in IndexedDB (avoids Chrome messaging size limits)
+    console.log('[GPTCast SW] Storing segments in IndexedDB:', currentAudioResult.segments.length);
+    await storeAudioSegments(currentAudioResult.segments);
 
-    if (!mixResponse.success) {
-      sendResponse(mixResponse);
+    // Send small message to trigger offscreen processing
+    let mixResponse;
+    try {
+      mixResponse = await chrome.runtime.sendMessage({
+        type: MSG.MIX_AUDIO_OFFSCREEN,
+        musicUrl
+        // segments are read from IndexedDB by offscreen
+      });
+      console.log('[GPTCast SW] Offscreen response received:', mixResponse?.success);
+    } catch (msgError) {
+      console.error('[GPTCast SW] Message to offscreen failed:', msgError.message);
+      // Try recreating offscreen document and retry
+      offscreenDocumentCreated = false;
+      await ensureOffscreenDocument();
+      mixResponse = await chrome.runtime.sendMessage({
+        type: MSG.MIX_AUDIO_OFFSCREEN,
+        musicUrl
+      });
+    }
+
+    if (!mixResponse?.success) {
+      sendResponse(mixResponse || { success: false, error: 'No response from audio mixer' });
       return;
     }
 

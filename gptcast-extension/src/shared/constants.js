@@ -6,7 +6,7 @@
 export const API = {
   GEMINI_BASE: 'https://generativelanguage.googleapis.com/v1beta/models',
   GEMINI_MODEL: 'gemini-2.0-flash',
-  GEMINI_TTS_MODEL: 'gemini-2.5-flash-tts',
+  GEMINI_TTS_MODEL: 'gemini-2.5-flash-preview-tts',
   MAX_RETRIES: 3,
   RETRY_DELAY_MS: 1000,
   TIMEOUT_TEXT_MS: 30000,

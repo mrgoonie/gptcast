@@ -86,7 +86,18 @@ We keep all important docs in `./docs` folder and keep updating them, structure 
 ```
 
 ## API Docs
-
-- Gemini TTS: https://docs.cloud.google.com/text-to-speech/docs/gemini-tts
+Gemini TTS:
+- https://docs.cloud.google.com/text-to-speech/docs/gemini-tts
+- https://github.com/GoogleCloudPlatform/generative-ai/blob/main/audio/speech/getting-starte
+d/get_started_with_gemini_tts_voices.ipynb
+- https://docs.cloud.google.com/text-to-speech/docs/chirp3-hd
+- https://docs.cloud.google.com/text-to-speech/docs/chirp3-instant-custom-voice
+- https://docs.cloud.google.com/text-to-speech/docs/create-audio-text-client-libraries
+- https://docs.cloud.google.com/text-to-speech/docs/create-audio-text-command-line
+- https://docs.cloud.google.com/text-to-speech/docs/create-audio-text-long-audio-synthesis
+- https://docs.cloud.google.com/text-to-speech/docs/create-audio
+- https://docs.cloud.google.com/text-to-speech/docs/list-voices-and-types
+- https://docs.cloud.google.com/text-to-speech/docs/endpoints
+- https://docs.cloud.google.com/text-to-speech/quotas
 
 **IMPORTANT:** *MUST READ* and *MUST COMPLY* all *INSTRUCTIONS* in project `./CLAUDE.md`, especially *WORKFLOWS* section is *CRITICALLY IMPORTANT*, this rule is *MANDATORY. NON-NEGOTIABLE. NO EXCEPTIONS. MUST REMEMBER AT ALL TIMES!!!*

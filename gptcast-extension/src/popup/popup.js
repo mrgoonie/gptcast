@@ -72,10 +72,13 @@ function setupEventListeners() {
 }
 
 function setupProgressListener() {
-  chrome.runtime.onMessage.addListener((message) => {
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === MSG.PROGRESS_UPDATE) {
       updateProgress(message);
     }
+    // Return false/undefined for messages we don't handle with sendResponse
+    // This signals we won't respond asynchronously
+    return false;
   });
 }
 

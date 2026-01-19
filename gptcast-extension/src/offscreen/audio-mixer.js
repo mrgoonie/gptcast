@@ -48,6 +48,8 @@ export class AudioMixer {
       throw new Error('No audio content to mix');
     }
 
+    console.log('[AudioMixer] Total duration:', totalDuration.toFixed(2), 'seconds');
+
     this.safeProgress(onProgress, { stage: 'mixing', progress: 50, detail: 'Mixing tracks...' });
 
     const recorder = this.setupRecorder();
@@ -283,6 +285,7 @@ export class AudioMixer {
       };
 
       recorder.onstop = () => {
+        console.log('[AudioMixer] Recording stopped, chunks:', chunks.length);
         const blob = new Blob(chunks, { type: recorder.mimeType });
         resolve(blob);
       };
@@ -295,6 +298,7 @@ export class AudioMixer {
 
       // Stop after duration + adaptive buffer (5% min 2s max 10s)
       const bufferTime = Math.min(10, Math.max(2, duration * 0.05));
+      console.log('[AudioMixer] Recording started, will stop in', (duration + bufferTime).toFixed(2), 'seconds');
       setTimeout(() => {
         if (recorder.state === 'recording') {
           recorder.stop();

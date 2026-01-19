@@ -17,6 +17,8 @@ export const MSG = {
 
   // Audio mixing
   MIX_AUDIO: 'mix_audio',
+  MIX_AUDIO_OFFSCREEN: 'mix_audio_offscreen',  // Internal: SW -> offscreen
+  OFFSCREEN_READY: 'offscreen_ready',  // Offscreen -> SW: document ready
   AUDIO_READY: 'audio_ready',
 
   // Full pipeline
