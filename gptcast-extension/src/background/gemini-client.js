@@ -71,7 +71,8 @@ export class GeminiClient {
     const { voice = 'Puck', emotion = 'neutral' } = options;
     const prompt = this.buildTTSPrompt(text, emotion);
 
-    const endpoint = `${API.GEMINI_BASE}/${this.model}:generateContent?key=${this.apiKey}`;
+    const ttsModel = API.GEMINI_TTS_MODEL || 'gemini-2.5-flash-tts';
+    const endpoint = `${API.GEMINI_BASE}/${ttsModel}:generateContent?key=${this.apiKey}`;
 
     const body = {
       contents: [{
